@@ -91,11 +91,44 @@ bot.on('message', (msg) => {
     return;
   }
 
-  // Пользовательское сообщение (текст или фото)
+  // Пользовательское сообщение
   if (String(chatId) !== adminChatId) {
     const choice = userChoices.get(chatId) || 'Не выбрано';
     const username = msg.from.username || `${msg.from.first_name || ''} ${msg.from.last_name || ''}`.trim();
 
+    // === 📸 Если это группа фото (альбом) ===
+    if (msg.media_group_id && msg.photo) {
+      const groupId = msg.media_group_id;
+      if (!mediaGroups.has(groupId)) {
+        mediaGroups.set(groupId, []);
+        // Отложенная отправка всей группы через 500 мс
+        setTimeout(() => {
+          const items = mediaGroups.get(groupId);
+          if (!items) return;
+
+          const media = items.map((m, i) => ({
+            type: 'photo',
+            media: m.photoId,
+            caption: i === 0 ? `📸 Фото от @${username || 'без имени'}\n\n*Выбор:* ${choice}\n\n*Описание:* ${m.caption || 'Без описания'}` : undefined,
+            parse_mode: 'Markdown'
+          }));
+
+          bot.sendMediaGroup(adminChatId, media).then((sentMessages) => {
+            userMessages.set(sentMessages[0].message_id, chatId);
+          });
+
+          mediaGroups.delete(groupId);
+        }, 500);
+      }
+
+      const photoId = msg.photo[msg.photo.length - 1].file_id;
+      mediaGroups.get(groupId).push({ photoId, caption: msg.caption });
+
+      bot.sendMessage(chatId, 'Спасибо! Мы обработаем ваш заказ и ответим в течение 1–2 дней.');
+      return;
+    }
+
+    // === 🖼 Одиночное фото ===
     if (msg.photo) {
       const photoId = msg.photo[msg.photo.length - 1].file_id;
       const caption = msg.caption || 'Без описания';
@@ -108,7 +141,11 @@ bot.on('message', (msg) => {
       });
 
       bot.sendMessage(chatId, 'Спасибо! Мы обработаем ваш заказ и ответим в течение 1–2 дней.');
-    } else if (msg.text) {
+      return;
+    }
+
+    // === 💬 Текстовое сообщение ===
+    if (msg.text) {
       bot.sendMessage(adminChatId,
         `📨 Сообщение от @${username || 'без имени'}\n\n*Выбор:* ${choice}\n\n*Текст:* ${msg.text}`, {
           parse_mode: 'Markdown'
@@ -119,9 +156,4 @@ bot.on('message', (msg) => {
       bot.sendMessage(chatId, 'Спасибо! Мы обработаем ваше сообщение и ответим в течение 1–2 дней.');
     }
   }
-});
-
-// Отладка ошибок polling
-bot.on('polling_error', (error) => {
-  console.error('Polling error:', error.code, error.message, error.response?.body);
 });
