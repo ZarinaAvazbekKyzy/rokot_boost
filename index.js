@@ -71,9 +71,8 @@ bot.on('callback_query', (query) => {
 });
 
 const mediaGroups = new Map();
-const mediaTimers = new Map();
 
-bot.on('message', (msg) => {
+bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
 
   // Пропуск команд
@@ -93,53 +92,53 @@ bot.on('message', (msg) => {
     return;
   }
 
-  // === Пользовательские сообщения ===
+  // Пользовательское сообщение
   if (String(chatId) !== adminChatId) {
     const choice = userChoices.get(chatId) || 'Не выбрано';
     const username = msg.from.username || `${msg.from.first_name || ''} ${msg.from.last_name || ''}`.trim();
 
-    // === 1. Обработка группы фото (альбом) ===
+    // === Альбом (группа фото)
     if (msg.media_group_id && msg.photo) {
       const groupId = msg.media_group_id;
       const photoId = msg.photo[msg.photo.length - 1].file_id;
-      const caption = msg.caption;
+      const caption = msg.caption || 'Без описания';
 
       if (!mediaGroups.has(groupId)) {
-        mediaGroups.set(groupId, []);
+        mediaGroups.set(groupId, {
+          chatId,
+          username,
+          choice,
+          items: [],
+          timeout: null
+        });
       }
-      mediaGroups.get(groupId).push({ photoId, caption });
 
-      // Сброс и установка нового таймера
-      if (mediaTimers.has(groupId)) {
-        clearTimeout(mediaTimers.get(groupId));
-      }
+      const group = mediaGroups.get(groupId);
+      group.items.push({ photoId, caption });
 
-      const timer = setTimeout(() => {
-        const items = mediaGroups.get(groupId);
-        if (!items) return;
+      // Перезапуск таймера (если приходит новая часть альбома)
+      clearTimeout(group.timeout);
 
-        const media = items.map((m, i) => ({
+      group.timeout = setTimeout(() => {
+        const media = group.items.map((item, i) => ({
           type: 'photo',
-          media: m.photoId,
-          caption: i === 0 ? `📸 Фото от @${username || 'без имени'}\n\n*Выбор:* ${choice}\n\n*Описание:* ${m.caption || 'Без описания'}` : undefined,
+          media: item.photoId,
+          caption: i === 0 ? `📸 Фото от @${group.username || 'без имени'}\n\n*Выбор:* ${group.choice}\n\n*Описание:* ${item.caption}` : undefined,
           parse_mode: 'Markdown'
         }));
 
-        bot.sendMediaGroup(adminChatId, media).then(sentMessages => {
-          userMessages.set(sentMessages[0].message_id, chatId);
+        bot.sendMediaGroup(adminChatId, media).then((sent) => {
+          userMessages.set(sent[0].message_id, group.chatId);
         });
 
-        bot.sendMessage(chatId, 'Спасибо! Мы обработаем ваш заказ и ответим в течение 1–2 дней.');
+        bot.sendMessage(group.chatId, 'Спасибо! Мы обработаем ваш заказ и ответим в течение 1–2 дней.');
 
         mediaGroups.delete(groupId);
-        mediaTimers.delete(groupId);
-      }, 1200); // чуть больше 1 секунды
-
-      mediaTimers.set(groupId, timer);
+      }, 1500); // ждём 1.5 сек после последнего фото
       return;
     }
 
-    // === 2. Одиночное фото ===
+    // === Одиночное фото
     if (msg.photo) {
       const photoId = msg.photo[msg.photo.length - 1].file_id;
       const caption = msg.caption || 'Без описания';
@@ -155,7 +154,7 @@ bot.on('message', (msg) => {
       return;
     }
 
-    // === 3. Текстовое сообщение ===
+    // === Текст
     if (msg.text) {
       bot.sendMessage(adminChatId,
         `📨 Сообщение от @${username || 'без имени'}\n\n*Выбор:* ${choice}\n\n*Текст:* ${msg.text}`, {
@@ -168,3 +167,4 @@ bot.on('message', (msg) => {
     }
   }
 });
+
